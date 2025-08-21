@@ -1,0 +1,32 @@
+{
+  "name": "ptudw-mssv",
+  "version": "1.0.0",
+  "description": "HCMUS Web Course Project",
+  "main": "server/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "nodemon server/server.js",
+    "start": "node server/server.js",
+    "build": "echo 'No build step defined'",
+    "test": "echo \"No test specified\" && exit 0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CaoQuocViet/ptudw-22810218.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CaoQuocViet/ptudw-22810218/issues"
+  },
+  "homepage": "https://github.com/CaoQuocViet/ptudw-22810218#readme",
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.1.0",
+    "cors": "^2.8.5",
+    "morgan": "^1.10.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  }
+}
