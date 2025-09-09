@@ -98,7 +98,7 @@ controller.getAllProducts = async (req, res) => {
   // sort
   const validSortFields = ["price", "name", "createdAt"];
   const validSortOrders = ["ASC", "DESC"];
-  if(validSortFields.includes(sortBy) && validSortOrders.includes(sortOrder.toUpperCase())) {
+  if (validSortFields.includes(sortBy) && validSortOrders.includes(sortOrder.toUpperCase())) {
     option.order = [[sortBy, sortOrder.toUpperCase()]];
   } else {
     sortBy = "price";
@@ -172,7 +172,7 @@ controller.getProductById = async (req, res) => {
     ]
   });
 
- if (!product) {
+  if (!product) {
     throw new ApiError(400, "Khong tim thay san pham");
   }
 
@@ -185,13 +185,17 @@ controller.getProductById = async (req, res) => {
 /**
  * Create a new product
  */
-controller.createProduct = (req, res) => {
+controller.createProduct = async (req, res) => {
   // Extract product data from request body
-  const { name, description, price, categoryId } = req.body;
+  const { name, description, price, categoryId, imagePath, summary } = req.body;
 
   // Validate required fields
-  if (!name || !description || !price || !categoryId) {
-    throw new ApiError(400, "Thieu thuoc tinh");
+  if (!name) {
+    throw new ApiError(400, "Ten khong duoc de trong");
+  }
+
+  if (!price) {
+    throw new ApiError(400, "Gia khong duoc de trong");
   }
 
   // Validate price is a number
@@ -205,18 +209,26 @@ controller.createProduct = (req, res) => {
   }
 
   // Create new product object with auto-generated ID
-  const newProduct = {
-    id: Product.length + 1,
+  let newProduct = {
     name,
-    description,
     price,
-    categoryId,
   };
 
-  // Add the new product to the products array
-  Product.push(newProduct);
+  if (description) {
+    newProduct.description = description;
+  }
+  if (categoryId) {
+    newProduct.categoryId = categoryId;
+  }
+  if (imagePath) {
+    newProduct.imagePath = imagePath;
+  }
+  if (summary) {
+    newProduct.summary = summary;
+  }
 
-  // Send successful response with the created product
+  // Add the new product to the products array
+  newProduct = await Product.create(newProduct);
   res
     .status(201)
     .json(new ApiResponse(201, newProduct, "Them san pham thanh cong"));
@@ -225,76 +237,91 @@ controller.createProduct = (req, res) => {
 /**
  * Update an existing product by ID
  */
-controller.updateProduct = (req, res) => {
-  // Extract and validate product ID from URL parameters
-  let { id } = req.params;
+controller.updateProduct = async (req, res) => {
+  try {
+    // Lấy id từ URL param
+    let { id } = req.params;
+    let { name, description, price, categoryId, imagePath, summary } = req.body;
 
-  if (isNaN(id)) {
-    throw new ApiError(400, "id phai la so nguyen");
-  }
+    // Validate id
+    if (isNaN(id)) {
+      throw new ApiError(400, "id phai la so nguyen");
+    }
+    id = parseInt(id);
 
-  id = parseInt(id);
+    // Validate required fields
+    if (!name) {
+      throw new ApiError(400, "Ten khong duoc de trong");
+    }
 
-  // Find the product to update
-  const product = Product.find((product) => product.id === id);
-
-  if (!product) {
-    throw new ApiError(400, "Khong tim thay san pham");
-  }
-
-  // Extract update data from request body
-  const { name, description, price, categoryId } = req.body;
-
-  // Update product fields if provided
-  if (name) {
-    product.name = name;
-  }
-  if (description) {
-    product.description = description;
-  }
-  if (price) {
+    if (price === undefined || price === null) {
+      throw new ApiError(400, "Gia khong duoc de trong");
+    }
     if (isNaN(price)) {
       throw new ApiError(400, "Gia phai la so thuc");
     }
-    product.price = price;
-  }
-  if (categoryId) {
-    if (isNaN(categoryId)) {
-      throw new ApiError(400, "categoryId phai la so nguyen");
-    }
-    product.categoryId = categoryId;
-  }
+    price = parseFloat(price);
 
-  // Send successful response with updated product
-  res.json(new ApiResponse(200, product, "Cap nhat san pham thanh cong"));
+    if (isNaN(categoryId)) {
+      throw new ApiError(400, "Category ID phai la so nguyen");
+    }
+    categoryId = parseInt(categoryId);
+
+    // Tìm product
+    const product = await Product.findByPk(id);
+    if (!product) {
+      throw new ApiError(400, "Khong tim thay san pham");
+    }
+
+    // Kiểm tra category tồn tại
+    const category = await Category.findByPk(categoryId);
+    if (!category) {
+      throw new ApiError(400, "Khong tim thay danh muc");
+    }
+
+    // Gán dữ liệu mới
+    product.name = name;
+    product.description = description || product.description;
+    product.price = price;
+    product.categoryId = categoryId;
+    product.imagePath = imagePath || product.imagePath;
+    product.summary = summary || product.summary;
+
+    // Lưu thay đổi
+    await product.save();
+
+    // Trả response
+    res.json(new ApiResponse(200, product, "Cap nhat san pham thanh cong"));
+  } catch (err) {
+    console.error(err);
+    res.status(err.statusCode || 500).json(
+      new ApiResponse(err.statusCode || 500, null, err.message || "Loi server")
+    );
+  }
 };
+
 
 /**
  * Delete a product by ID
  */
-controller.deleteProduct = (req, res) => {
-  // Extract and validate product ID from URL parameters
+controller.deleteProduct = async (req, res) => {
   let { id } = req.params;
-
   if (isNaN(id)) {
     throw new ApiError(400, "id phai la so nguyen");
   }
 
   id = parseInt(id);
+  const product = await Product.findByPk(id);
 
-  // Find the index of the product to delete
-  const index = Product.findIndex((product) => product.id === id);
-
-  if (index === -1) {
+  if (!product) {
     throw new ApiError(404, "Khong tim thay san pham");
   }
 
-  // Remove the product from the array
-  Product.splice(index, 1);
+  await Product.destroy({ where: { id } });
 
-  // Send successful response indicating deletion
-  res.json(new ApiResponse(204, null, "Xoa san pham thanh cong"));
+  // Trả về status 200 + message
+  res.json(new ApiResponse(200, null, "Xoa san pham thanh cong"));
 };
 
-// Export the controller object with all methods
+
 module.exports = controller;
