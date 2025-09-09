@@ -1,29 +1,61 @@
-// Initialize controller object to hold all product-related controller functions
 const controller = {};
-
-// Import utility classes for error and response handling
 const ApiError = require("../utils/apiError");
 const ApiResponse = require("../utils/apiResponse");
-
-// Import Product model for data access
-const { Product } = require("../models");
+const { Product, Category, Tag } = require("../models");
+const { Op } = require("sequelize");
 
 /**
  * Get all products with optional filtering
  * Supports filtering by search term, category ID, and price range
  */
-controller.getAllProducts = (req, res) => {
+controller.getAllProducts = async (req, res) => {
   // Extract query parameters for filtering
-  let { search, categoryId, minPrice, maxPrice } = req.query;
-  let products = Product;
+  let {
+    search,
+    categoryId,
+    tagId,
+    minPrice,
+    maxPrice,
+    page = 1,
+    limit = 10,
+    sortBy = "price",
+    sortOrder = "ASC",
+  } = req.query;
+
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
+  const offset = (pageNum - 1) * limitNum;
+
+  let option = {
+    where: {},
+    limit: limitNum,
+    offset: offset,
+    order: [[sortBy, sortOrder.toUpperCase()]],
+    include: [
+      {
+        model: Category,
+        attributes: ["id", "name"],
+        required: false,
+      },
+      {
+        model: Tag,
+        through: {
+          attributes: [],
+        }, // Exclude attributes from join table (ProductTag)
+        attributes: ["id", "name"],
+        required: false,
+      },
+    ],
+    distint: true, // Ensure distinct products when joining with many-to-many tables
+  };
 
   // Filter by search term (searches in both name and description)
   if (search) {
-    products = products.filter(
-      (product) =>
-        product.name.toLowerCase().includes(search.toLowerCase()) ||
-        product.description.toLowerCase().includes(search.toLowerCase())
-    );
+    option.where[Op.or] = [
+      { name: { [Op.iLike]: `%${search}%` } },
+      { description: { [Op.iLike]: `%${search}%` } },
+      { summary: { [Op.iLike]: `%${search}%` } },
+    ];
   }
 
   // Filter by category ID
@@ -32,7 +64,17 @@ controller.getAllProducts = (req, res) => {
       throw new ApiError(400, "categoryId phai la so nguyen");
     }
     categoryId = parseInt(categoryId);
-    products = products.filter((product) => product.categoryId === categoryId);
+    option.where.categoryId = categoryId;
+  }
+
+  // Filter by tag ID
+  if (tagId) {
+    if (isNaN(tagId)) {
+      throw new ApiError(400, "tagId phai la so nguyen");
+    }
+    tagId = parseInt(tagId);
+    option.include[1].where = { id: tagId };
+    option.include[1].required = true; // Ensure only products with the specified tag are returned
   }
 
   // Filter by minimum price
@@ -41,7 +83,7 @@ controller.getAllProducts = (req, res) => {
       throw new ApiError(400, "minPrice phai la so thuc");
     }
     minPrice = parseFloat(minPrice);
-    products = products.filter((product) => product.price >= minPrice);
+    option.where.price = { [Op.gte]: minPrice };
   }
 
   // Filter by maximum price
@@ -50,54 +92,94 @@ controller.getAllProducts = (req, res) => {
       throw new ApiError(400, "maxPrice phai la so thuc");
     }
     maxPrice = parseFloat(maxPrice);
-    products = products.filter((product) => product.price <= maxPrice);
+    option.where.price = { [Op.lte]: maxPrice };
   }
 
+  // sort
+  const validSortFields = ["price", "name", "createdAt"];
+  const validSortOrders = ["ASC", "DESC"];
+  if(validSortFields.includes(sortBy) && validSortOrders.includes(sortOrder.toUpperCase())) {
+    option.order = [[sortBy, sortOrder.toUpperCase()]];
+  } else {
+    sortBy = "price";
+    sortOrder = "ASC";
+    option.order = [["price", "ASC"]];
+  }
+
+  const { count, rows } = await Product.findAndCountAll(option);
+
   // Check if any products match the filters
-  if (products.length === 0) {
+  if (rows.length === 0) {
     throw new ApiError(404, "Khong tim thay san pham nao");
   }
 
   // Prepare response data with products and applied filters
   const responseData = {
-    products: products,
+    products: rows,
+    pagination: {
+      totalItems: count,
+      totalPages: Math.ceil(count / limitNum),
+      currentPage: pageNum,
+      limit: limitNum,
+    },
     filters: {
       search: search || null,
       categoryId: categoryId || null,
+      tagId: tagId || null,
       minPrice: minPrice || null,
       maxPrice: maxPrice || null,
+      limit: limitNum,
+      page: pageNum,
+      sortBy: sortBy,
+      sortOrder: sortOrder.toUpperCase(),
     },
   };
 
   // Send successful response with filtered products
   res
     .status(200)
-    .json(new ApiResponse(200, responseData, "Tim danh sach san pham thanh cong"));
+    .json(
+      new ApiResponse(200, responseData, "Tim danh sach san pham thanh cong")
+    );
 };
 
 /**
  * Get a single product by its ID
  */
-controller.getProductById = (req, res) => {
-  // Extract and validate product ID from URL parameters
+controller.getProductById = async (req, res) => {
   let { id } = req.params;
-  
+
   if (isNaN(id)) {
     throw new ApiError(400, "ID phai la so nguyen");
   }
-  
+
   id = parseInt(id);
-  
-  // Find the product with the specified ID
-  const product = Product.find((product) => product.id === id);
-  
-  // Check if product exists
-  if (!product) {
+  const product = await Product.findByPk(id, {
+    include: [
+      {
+        model: Category,
+        attributes: ["id", "name"],
+        required: false,
+      },
+      {
+        model: Tag,
+        through: {
+          attributes: [],
+        },
+        attributes: ["id", "name"],
+        required: false,
+      }
+    ]
+  });
+
+ if (!product) {
     throw new ApiError(400, "Khong tim thay san pham");
   }
-  
+
   // Send successful response with the found product
-  res.status(200).json(new ApiResponse(200, product, "Tim san pham thanh cong"));
+  res
+    .status(200)
+    .json(new ApiResponse(200, product, "Tim san pham thanh cong"));
 };
 
 /**
@@ -133,7 +215,7 @@ controller.createProduct = (req, res) => {
 
   // Add the new product to the products array
   Product.push(newProduct);
-  
+
   // Send successful response with the created product
   res
     .status(201)
@@ -146,16 +228,16 @@ controller.createProduct = (req, res) => {
 controller.updateProduct = (req, res) => {
   // Extract and validate product ID from URL parameters
   let { id } = req.params;
-  
+
   if (isNaN(id)) {
     throw new ApiError(400, "id phai la so nguyen");
   }
-  
+
   id = parseInt(id);
-  
+
   // Find the product to update
   const product = Product.find((product) => product.id === id);
-  
+
   if (!product) {
     throw new ApiError(400, "Khong tim thay san pham");
   }
@@ -197,19 +279,19 @@ controller.deleteProduct = (req, res) => {
   if (isNaN(id)) {
     throw new ApiError(400, "id phai la so nguyen");
   }
-  
+
   id = parseInt(id);
-  
+
   // Find the index of the product to delete
   const index = Product.findIndex((product) => product.id === id);
-  
+
   if (index === -1) {
     throw new ApiError(404, "Khong tim thay san pham");
   }
 
   // Remove the product from the array
   Product.splice(index, 1);
-  
+
   // Send successful response indicating deletion
   res.json(new ApiResponse(204, null, "Xoa san pham thanh cong"));
 };
