@@ -1,8 +1,8 @@
 const controller = {};
 
-const ApiError = require("../error/ApiError");
-const ApiResponse = require("../response/ApiResponse");
-const { User } = require("../models/User");
+const ApiError = require("../utils/apiError");
+const ApiResponse = require("../utils/apiResponse");
+const { User } = require("../models");
 const { Op } = require("sequelize");
 const bcrypt = require("bcrypt");
 const { user } = require("pg/lib/defaults");
